@@ -20,10 +20,10 @@ if not GEMINI_API_KEY:
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 
-MODEL_ID = "gemini-2.5-flash"
+MODEL_ID = "gemma-3-27b"
 
 
-def generate_subtopics(user_question, retries=3, delay=2):
+def generate_subtopics(user_question, retries=0, delay=0):
     system_prompt = f"""
     You are a learning design assistant.
     
@@ -90,7 +90,7 @@ def generate_subtopics(user_question, retries=3, delay=2):
     return None
 
 
-def generate_explanation_and_activity(subtopic, user_question, retries=3, delay=2):
+def generate_explanation_and_activity(subtopic, user_question, retries=0, delay=0):
     system_prompt = f"""
     You are an educational tutor and interaction designer that provides clear, engaging explanations for specific topics related to a student's curiosity.
 
@@ -155,7 +155,7 @@ def generate_explanation_and_activity(subtopic, user_question, retries=3, delay=
     return None
 
 
-def generate_interactive_activity(topic, explanation, template_type='drag_drop', retries=3, delay=2):
+def generate_interactive_activity(topic, explanation, template_type='drag_drop', retries=0, delay=0):
     system_prompt = f"""
     You are an educational interaction designer.
     
