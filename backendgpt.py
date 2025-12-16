@@ -20,7 +20,7 @@ if not GEMINI_API_KEY:
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 
-MODEL_ID = "gemma-3-27b"
+MODEL_ID = "gemini-2.5-flash-lite"
 
 
 def generate_subtopics(user_question, retries=1, delay=3):
