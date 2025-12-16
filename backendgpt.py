@@ -1,43 +1,29 @@
-
-import requests
+import os
 import time
 import json
-import re
+from google import genai
+from google.genai import types
+from google.genai import errors
+from dotenv import load_dotenv
 
-url = "https://api.together.xyz/v1/chat/completions"
-headers = {
-    "Authorization": "Bearer 0a12e0c577c401ea0e5d79f44fba4fe49b8ef5b865e864c6f6e6965bb756540d"
-}
-system_prompt = {
-    "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
-    "messages": [
-        {"role": "system", "content": "You are an educational tutor that helps students explore topics."},
-        {"role": "user", "content": "Why is the sky blue?"}
-    ],
-    "temperature": 0.7,
-    "max_tokens": 300
-}
+load_dotenv()
 
 
 
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+if not GEMINI_API_KEY:
+    # Raise error if key is missing
+    raise ValueError("❌ Missing API Key! Set 'GEMINI_API_KEY' in your environment variables.")
+
+# Initialize the new client
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 
+MODEL_ID = "gemini-2.5-flash"
 
 
-
-
-# TOGETHER.AI API SETUP
-url = "https://api.together.xyz/v1/chat/completions"
-headers = {
-    "Authorization": "Bearer 0a12e0c577c401ea0e5d79f44fba4fe49b8ef5b865e864c6f6e6965bb756540d"
-}
-
-# YOUR QUESTION TO ANALYZE
-user_question = "who invented the chair"
-
-
-
-def generate_subtopics(user_question, retries = 3, delay = 2):
+def generate_subtopics(user_question, retries=3, delay=2):
     system_prompt = f"""
     You are a learning design assistant.
     
@@ -65,56 +51,43 @@ def generate_subtopics(user_question, retries = 3, delay = 2):
     "{user_question}"
     """
     
-    # REQUEST PAYLOAD
-    payload = {
-        "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_question}
-        ],
-        "temperature": 0.7,
-        "max_tokens": 500
-    }
+    # New Config Pattern
+    config = types.GenerateContentConfig(
+        system_instruction=system_prompt,
+        response_mime_type="application/json",
+        temperature=0.7,
+        max_output_tokens=500
+    )
     
-    # # API CALL
-    # response = requests.post(url, headers=headers, json=payload)
-    
-    # # HANDLE RESPONSE
-    # if response.status_code == 200:
-    #     print(response.json()["choices"][0]["message"]["content"])
-    # else:
-    #     print(f"❌ Error {response.status_code}:")
-    #     print(response.text)
-
     for attempt in range(1, retries + 1):
         try:
-            response = requests.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-
-            content = response.json()["choices"][0]["message"]["content"]
-            if content:
-                return json.loads(content)
-            else:
-                print(f"⚠️ Empty content received on attempt {attempt}")
-
-        except requests.exceptions.HTTPError as e:
-            if response.status_code == 429:
-                print(f"🚫 Too many requests — attempt {attempt}")
-            else:
-                print(f"❌ HTTP error on attempt {attempt}: {e}")
-        
+            # New Generation Call
+            response = client.models.generate_content(
+                model=MODEL_ID,
+                contents=user_question,
+                config=config
+            )
             
-        wait_time = delay * (2 ** (attempt - 1)) + (0.5 * attempt)
-        print(f"🔁 Retrying in {wait_time:.1f} seconds...\n")
-        time.sleep(wait_time)
+            # Helper to handle potential parsing issues
+            if response.text:
+                return json.loads(response.text)
+            else:
+                print(f"⚠️ Empty response on attempt {attempt}")
+
+        except errors.APIError as e:
+            # Handle standard API errors (like 429 Rate Limit)
+            print(f"❌ API Error on attempt {attempt}: {e}")
+        except Exception as e:
+            print(f"❌ Unexpected Error on attempt {attempt}: {e}")
+        
+        # Exponential backoff
+        if attempt < retries:
+            wait_time = delay * (2 ** (attempt - 1))
+            print(f"🔁 Retrying in {wait_time} seconds...")
+            time.sleep(wait_time)
 
     print("❌ Max retries reached. Could not generate subtopics.")
     return None
-
-
-
-
-
 
 
 def generate_explanation_and_activity(subtopic, user_question, retries=3, delay=2):
@@ -155,57 +128,34 @@ def generate_explanation_and_activity(subtopic, user_question, retries=3, delay=
     Now, perform the task and return only the JSON object.
     """
 
-    payload = {
-        "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": subtopic}
-        ],
-        "temperature": 0.7,
-        "max_tokens": 500
-    }
+    config = types.GenerateContentConfig(
+        system_instruction=system_prompt,
+        response_mime_type="application/json",
+        temperature=0.7,
+        max_output_tokens=1000
+    )
 
     for attempt in range(1, retries + 1):
         try:
-            response = requests.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
-            if content:
-                return json.loads(content)
-            else:
-                print(f"⚠️ Empty response on attempt {attempt}")
-        except (requests.exceptions.RequestException, KeyError) as e:
+            response = client.models.generate_content(
+                model=MODEL_ID,
+                contents=subtopic,
+                config=config
+            )
+            return json.loads(response.text)
+            
+        except Exception as e:
             print(f"❌ Attempt {attempt} failed: {e}")
+        
         if attempt < retries:
-            print(f"🔁 Retrying in {delay} seconds...\n")
-            time.sleep(delay)
-        else:
-            print("❌ Max retries reached. Could not get explanation and template.")
-            return None
+            wait_time = delay * (2 ** (attempt - 1))
+            time.sleep(wait_time)
+            
+    print("❌ Max retries reached. Could not get explanation.")
+    return None
 
 
-# In[249]:
-
-
-# explanation_json = generate_explanation_and_activity(subtopic, user_question, retries=3, delay=2)
-
-
-# In[251]:
-
-
-# print(explanation_json)
-
-
-# In[252]:
-
-
-# type(explanation_json)
-
-
-# In[255]:
-
-
-def generate_interactive_activity(topic, explanation, template_type = 'drag_drop', retries=3, delay=2):
+def generate_interactive_activity(topic, explanation, template_type='drag_drop', retries=3, delay=2):
     system_prompt = f"""
     You are an educational interaction designer.
     
@@ -214,19 +164,19 @@ def generate_interactive_activity(topic, explanation, template_type = 'drag_drop
     If the template is `drag_drop`, structure it like this:
     
     {{
-      id: "unique-id-for-the-activity",
-      type: "drag_drop",
-      title: "Title of the Game",
-      description: "One-line description of the drag-and-drop activity.",
-      draggableElements: [
-        {{ id: "id1", label: "Draggable Term 1" }},
-        {{ id: "id2", label: "Draggable Term 2" }}
+      "id": "unique-id-for-the-activity",
+      "type": "drag_drop",
+      "title": "Title of the Game",
+      "description": "One-line description of the drag-and-drop activity.",
+      "draggableElements": [
+        {{ "id": "id1", "label": "Draggable Term 1" }},
+        {{ "id": "id2", "label": "Draggable Term 2" }}
       ],
-      droppableBlanks: [
+      "droppableBlanks": [
         {{
-          id: "drop-1",
-          label: "Hint or definition where a term should go",
-          correctElementId: "id1"
+          "id": "drop-1",
+          "label": "Hint or definition where a term should go",
+          "correctElementId": "id1"
         }}
       ]
     }}
@@ -242,7 +192,7 @@ def generate_interactive_activity(topic, explanation, template_type = 'drag_drop
       "description": "Match each photosynthesis-related term with its correct definition.",
       "pairs": [
         {{ "prompt": "Chlorophyll", "match": "Green pigment that captures light energy" }},
-        {{ "prompt": "Stomata", "match": "Tiny pores on leaves where gas exchange occurs" }},
+        {{ "prompt": "Stomata", "match": "Tiny pores on leaves where gas exchange occurs" }}
       ]
     }}
     
@@ -259,16 +209,16 @@ def generate_interactive_activity(topic, explanation, template_type = 'drag_drop
     If the template is `fill_blanks`, structure it like this:
     
     {{
-      id: "unique-id",
-      type: "fill_in_blanks",
-      title: "Fill in the Blanks",
-      description: "Fill in the blanks using the correct terms.",
-      text: "... with ___ and ___",
-      blanks: {{
+      "id": "unique-id",
+      "type": "fill_in_blanks",
+      "title": "Fill in the Blanks",
+      "description": "Fill in the blanks using the correct terms.",
+      "text": "... with ___ and ___",
+      "blanks": {{
         "1": ["Melanin", "Keratin", "Chlorophyll"],
         "2": ["Melanocytes", "Blood cells", "Nerve cells"]
       }},
-      answers: {{
+      "answers": {{
         "1": "Melanin",
         "2": "Melanocytes"
       }}
@@ -277,11 +227,11 @@ def generate_interactive_activity(topic, explanation, template_type = 'drag_drop
     If the template is `toggle_true_false`, structure it like this:
     
     {{
-      id: "unique-id",
-      type: "toggle_true_false",
-      title: "True or False",
-      description: "Decide if the following statements are true or false.",
-      statements: [
+      "id": "unique-id",
+      "type": "toggle_true_false",
+      "title": "True or False",
+      "description": "Decide if the following statements are true or false.",
+      "statements": [
         {{ "id": "s1", "text": "Melanin protects the skin from UV radiation.", "correctAnswer": true }}
       ]
     }}
@@ -294,79 +244,27 @@ def generate_interactive_activity(topic, explanation, template_type = 'drag_drop
     Respond ONLY with the JSON object.
     """
 
-    payload = {
-        "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo-Free",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": template_type}
-        ],
-        "temperature": 0.7,
-        "max_tokens": 700
-    }
+    config = types.GenerateContentConfig(
+        system_instruction=system_prompt,
+        response_mime_type="application/json",
+        temperature=0.7
+    )
 
     for attempt in range(1, retries + 1):
         try:
-            response = requests.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            content = response.json()["choices"][0]["message"]["content"]
-            if content:
-                return content
-            else:
-                print(f"⚠️ Empty response on attempt {attempt}")
-        except (requests.exceptions.RequestException, KeyError) as e:
+            # Pass template_type as user content
+            response = client.models.generate_content(
+                model=MODEL_ID,
+                contents=template_type,
+                config=config
+            )
+            return json.loads(response.text)
+        except Exception as e:
             print(f"❌ Attempt {attempt} failed: {e}")
+        
         if attempt < retries:
-            print(f"🔁 Retrying in {delay} seconds...\n")
-            time.sleep(delay)
-        else:
-            print("❌ Max retries reached. Could not generate activity.")
-            return None
-
-
-# In[256]:
-
-
-# activity_json = generate_interactive_activity(explanation_json['Topic'], explanation_json['Explanation'], retries=3, delay=2)
-
-
-# In[257]:
-
-
-# print(activity_json)
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
-
-
-
-
+            wait_time = delay * (2 ** (attempt - 1))
+            time.sleep(wait_time)
+            
+    print("❌ Max retries reached. Could not generate activity.")
+    return None
